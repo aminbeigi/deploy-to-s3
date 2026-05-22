@@ -1,0 +1,47 @@
+name: Deploy to S3
+description: Upload a built dist/ directory to S3 and invalidate a CloudFront distribution.
+
+inputs:
+  dist-path:
+    description: Path to built assets, relative to the consumer repo root.
+    required: false
+    default: dist
+  aws-region:
+    description: AWS region (e.g. us-east-1). Store this in your repo's GitHub Secrets.
+    required: true
+  s3-bucket:
+    description: S3 bucket name to deploy into. Store this in your repo's GitHub Secrets.
+    required: true
+  cloudfront-distribution-id:
+    description: CloudFront distribution ID to invalidate after upload. Store this in your repo's GitHub Secrets.
+    required: true
+  aws-access-key-id:
+    description: AWS access key ID. Store this in your repo's GitHub Secrets.
+    required: true
+  aws-secret-access-key:
+    description: AWS secret access key. Store this in your repo's GitHub Secrets.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@v6
+      with:
+        python-version: "3.14"
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: uv sync --no-dev
+
+    - name: Deploy
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: uv run python -m deploy_to_s3
+      env:
+        DIST_PATH: ${{ github.workspace }}/${{ inputs.dist-path }}
+        AWS_REGION: ${{ inputs.aws-region }}
+        AWS_S3_BUCKET_NAME: ${{ inputs.s3-bucket }}
+        CLOUDFRONT_DISTRIBUTION_ID: ${{ inputs.cloudfront-distribution-id }}
+        AWS_ACCESS_KEY_ID: ${{ inputs.aws-access-key-id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.aws-secret-access-key }}
