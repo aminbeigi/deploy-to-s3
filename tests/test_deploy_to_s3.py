@@ -21,7 +21,7 @@ def aws_env(monkeypatch):
 
 
 def test_get_dist_dir_raises_when_missing(tmp_path):
-    with pytest.raises(FileNotFoundError, match="dist directory not found"):
+    with pytest.raises(FileNotFoundError, match="Dist directory not found"):
         _get_dist_dir(_base=tmp_path)
 
 
@@ -40,7 +40,7 @@ def test_get_dist_dir_uses_dist_path_env_var(tmp_path, monkeypatch):
 
 def test_get_dist_dir_dist_path_env_var_raises_when_missing(tmp_path, monkeypatch):
     monkeypatch.setenv("DIST_PATH", str(tmp_path / "nonexistent"))
-    with pytest.raises(FileNotFoundError, match="dist directory not found"):
+    with pytest.raises(FileNotFoundError, match="Dist directory not found"):
         _get_dist_dir()
 
 
@@ -150,7 +150,7 @@ def test_main_returns_1_when_dist_missing(
         exit_code = main()
 
     assert exit_code == 1
-    assert "deploy failed with exception type: FileNotFoundError" in caplog.text
+    assert "Deploy failed with exception type: FileNotFoundError" in caplog.text
     mock_boto_client.assert_not_called()
 
 
@@ -166,5 +166,5 @@ def test_main_returns_1_when_aws_env_missing(
         exit_code = main()
 
     assert exit_code == 1
-    assert "deploy failed with exception type: KeyError" in caplog.text
+    assert "Deploy failed with exception type: KeyError" in caplog.text
     mock_boto_client.assert_not_called()
