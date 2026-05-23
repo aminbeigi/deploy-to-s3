@@ -10,11 +10,13 @@ import os
 import sys
 import time
 from pathlib import Path
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import boto3
 
 if TYPE_CHECKING:
+    from botocore.client import BaseClient
     from mypy_boto3_s3 import S3Client
 
 _CLIENT_TYPE = "s3"
@@ -28,13 +30,35 @@ _REQUIRED_ENV = (
 )
 
 
-def _fetch_env_variables() -> dict[str, str | Path]:
+@dataclass(frozen=True)
+class EnvironmentConfig:
+    """Immutable container for deploy environment configuration.
+
+    Attributes:
+        aws_access_key_id: AWS access key ID for authentication.
+        aws_region: AWS region where the S3 bucket is hosted.
+        aws_s3_bucket_name: Name of the target S3 bucket.
+        aws_secret_access_key: AWS secret access key for authentication.
+        cloudfront_distribution_id: CloudFront distribution ID to invalidate after deploy.
+        dist_path: Resolved path to the local distribution directory to upload.
+    """
+
+    aws_access_key_id: str
+    aws_secret_access_key: str
+    aws_region: str
+    aws_s3_bucket_name: str
+    cloudfront_distribution_id: str
+    dist_path: Path
+
+
+def _fetch_env_variables() -> EnvironmentConfig:
     """Fetch and validate required environment variables and resolve the dist directory.
 
     Returns:
-        A dict with keys ``cloudfront_distribution_id``, ``aws_access_key_id``,
-        ``aws_secret_access_key``, ``aws_region``, ``aws_s3_bucket_name``, and
-        ``dist_path`` (a resolved :class:`~pathlib.Path` to the distribution directory).
+        An :class:`EnvironmentConfig` with ``cloudfront_distribution_id``,
+        ``aws_access_key_id``, ``aws_secret_access_key``, ``aws_region``,
+        ``aws_s3_bucket_name``, and ``dist_path`` (a resolved
+        :class:`~pathlib.Path` to the distribution directory).
 
     Raises:
         EnvironmentError: If any required environment variable is missing or empty.
@@ -42,7 +66,9 @@ def _fetch_env_variables() -> dict[str, str | Path]:
     """
     missing = [name for name in _REQUIRED_ENV if not os.environ.get(name)]
     if missing:
-        raise EnvironmentError(f"The following environment variables are not set: {missing}")
+        raise EnvironmentError(
+            f"The following environment variables are not set: {missing}"
+        )
 
     env_path = os.environ.get("DIST_PATH")
     if env_path:
@@ -52,14 +78,15 @@ def _fetch_env_variables() -> dict[str, str | Path]:
     if not dist_dir.exists():
         raise FileNotFoundError(f"Dist directory not found: {dist_dir}")
 
-    return {
-        "cloudfront_distribution_id": os.environ["CLOUDFRONT_DISTRIBUTION_ID"],
-        "aws_access_key_id": os.environ["AWS_ACCESS_KEY_ID"],
-        "aws_secret_access_key": os.environ["AWS_SECRET_ACCESS_KEY"],
-        "aws_region": os.environ["AWS_REGION"],
-        "aws_s3_bucket_name": os.environ["AWS_S3_BUCKET_NAME"],
-        "dist_path": dist_dir,
-    }
+    return EnvironmentConfig(
+        aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+        aws_region=os.environ["AWS_REGION"],
+        aws_s3_bucket_name=os.environ["AWS_S3_BUCKET_NAME"],
+        cloudfront_distribution_id=os.environ["CLOUDFRONT_DISTRIBUTION_ID"],
+        dist_path=dist_dir,
+    )
+
 
 def _setup_logger() -> logging.Logger:
     """Configure and return the application logger.
@@ -76,7 +103,6 @@ def _setup_logger() -> logging.Logger:
         stream=sys.stdout,
     )
     return logging.getLogger()
-
 
 
 def _upload_to_s3(
@@ -112,7 +138,9 @@ def _upload_to_s3(
     )
 
 
-def _invalidate_cloudfront(cloudfront, distribution_id: str, logger: logging.Logger) -> None:
+def _invalidate_cloudfront(
+    cloudfront: "BaseClient", distribution_id: str, logger: logging.Logger
+) -> None:
     """Invalidate all paths on the configured CloudFront distribution.
 
     Args:
@@ -152,24 +180,28 @@ def main() -> int:
         ``0`` on success, ``1`` if any step fails.
     """
     logger = _setup_logger()
-    environemnt_variables = _fetch_env_variables()
+    environment_variables = _fetch_env_variables()
     try:
         logger.info("Starting application deploy to S3")
-        credentials = dict[str, str](
-            region_name=environemnt_variables["aws_region"],
-            aws_access_key_id=environemnt_variables["aws_access_key_id"],
-            aws_secret_access_key=environemnt_variables["aws_secret_access_key"],
-        )
-
         _upload_to_s3(
-            boto3.client(_CLIENT_TYPE, **credentials),
-            environemnt_variables["aws_s3_bucket_name"],
-            environemnt_variables["dist_path"],
+            boto3.client(
+                _CLIENT_TYPE,
+                region_name=environment_variables.aws_region,
+                aws_access_key_id=environment_variables.aws_access_key_id,
+                aws_secret_access_key=environment_variables.aws_secret_access_key,
+            ),
+            environment_variables.aws_s3_bucket_name,
+            environment_variables.dist_path,
             logger,
         )
         _invalidate_cloudfront(
-            boto3.client("cloudfront", **credentials),
-            environemnt_variables["cloudfront_distribution_id"],
+            boto3.client(
+                "cloudfront",
+                region_name=environment_variables.aws_region,
+                aws_access_key_id=environment_variables.aws_access_key_id,
+                aws_secret_access_key=environment_variables.aws_secret_access_key,
+            ),
+            environment_variables.cloudfront_distribution_id,
             logger,
         )
         return 0
