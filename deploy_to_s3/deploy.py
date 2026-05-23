@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
 
 _CLIENT_TYPE = "s3"
+_CLOUDFRONT_CLIENT_TYPE = "cloudfront"
 _DIST_DIR_NAME = "dist"
 _REQUIRED_ENV = (
     "CLOUDFRONT_DISTRIBUTION_ID",
@@ -196,7 +197,7 @@ def main() -> int:
         )
         _invalidate_cloudfront(
             boto3.client(
-                "cloudfront",
+                _CLOUDFRONT_CLIENT_TYPE,
                 region_name=environment_variables.aws_region,
                 aws_access_key_id=environment_variables.aws_access_key_id,
                 aws_secret_access_key=environment_variables.aws_secret_access_key,
