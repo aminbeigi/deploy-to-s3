@@ -10,12 +10,56 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import boto3
 
+if TYPE_CHECKING:
+    from mypy_boto3_s3 import S3Client
+
 _CLIENT_TYPE = "s3"
 _DIST_DIR_NAME = "dist"
+_REQUIRED_ENV = (
+    "CLOUDFRONT_DISTRIBUTION_ID",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_REGION",
+    "AWS_S3_BUCKET_NAME",
+)
 
+
+def _fetch_env_variables() -> dict[str, str | Path]:
+    """Fetch and validate required environment variables and resolve the dist directory.
+
+    Returns:
+        A dict with keys ``cloudfront_distribution_id``, ``aws_access_key_id``,
+        ``aws_secret_access_key``, ``aws_region``, ``aws_s3_bucket_name``, and
+        ``dist_path`` (a resolved :class:`~pathlib.Path` to the distribution directory).
+
+    Raises:
+        EnvironmentError: If any required environment variable is missing or empty.
+        FileNotFoundError: If the resolved distribution directory does not exist.
+    """
+    missing = [name for name in _REQUIRED_ENV if not os.environ.get(name)]
+    if missing:
+        raise EnvironmentError(f"The following environment variables are not set: {missing}")
+
+    env_path = os.environ.get("DIST_PATH")
+    if env_path:
+        dist_dir = Path(env_path)
+    else:
+        dist_dir = Path(__file__).resolve().parent.parent / _DIST_DIR_NAME
+    if not dist_dir.exists():
+        raise FileNotFoundError(f"Dist directory not found: {dist_dir}")
+
+    return {
+        "cloudfront_distribution_id": os.environ["CLOUDFRONT_DISTRIBUTION_ID"],
+        "aws_access_key_id": os.environ["AWS_ACCESS_KEY_ID"],
+        "aws_secret_access_key": os.environ["AWS_SECRET_ACCESS_KEY"],
+        "aws_region": os.environ["AWS_REGION"],
+        "aws_s3_bucket_name": os.environ["AWS_S3_BUCKET_NAME"],
+        "dist_path": dist_dir,
+    }
 
 def _setup_logger() -> logging.Logger:
     """Configure and return the application logger.
@@ -34,35 +78,9 @@ def _setup_logger() -> logging.Logger:
     return logging.getLogger()
 
 
-def _get_dist_dir(_base: Path | None = None) -> Path:
-    """Resolve the local distribution directory path.
-
-    Uses the ``DIST_PATH`` environment variable when set; otherwise resolves
-    ``<base>/dist`` where ``base`` defaults to the project root (parent of this
-    package).
-
-    Args:
-        _base: Optional project root used when ``DIST_PATH`` is unset. Defaults
-            to the parent directory of this package.
-
-    Returns:
-        A :class:`~pathlib.Path` to the distribution directory.
-
-    Raises:
-        FileNotFoundError: If the resolved distribution directory does not exist.
-    """
-    if env_path := os.environ.get("DIST_PATH"):
-        dist_dir = Path(env_path)
-    else:
-        base = _base or Path(__file__).resolve().parent.parent
-        dist_dir = base / _DIST_DIR_NAME
-    if not dist_dir.exists():
-        raise FileNotFoundError(f"Dist directory not found: {dist_dir}")
-    return dist_dir
-
 
 def _upload_to_s3(
-    s3,
+    s3: "S3Client",
     bucket_name: str,
     dist_dir: Path,
     logger: logging.Logger,
@@ -94,23 +112,18 @@ def _upload_to_s3(
     )
 
 
-def _invalidate_cloudfront(cloudfront, logger: logging.Logger) -> None:
+def _invalidate_cloudfront(cloudfront, distribution_id: str, logger: logging.Logger) -> None:
     """Invalidate all paths on the configured CloudFront distribution.
-
-    Reads ``CLOUDFRONT_DISTRIBUTION_ID`` from the environment and requests a
-    wildcard invalidation for ``/*``.
 
     Args:
         cloudfront: A boto3 CloudFront client (or compatible mock) with a
             ``create_invalidation`` method.
+        distribution_id: The CloudFront distribution ID to invalidate.
         logger: Logger used for progress and completion messages.
-
-    Raises:
-        KeyError: If ``CLOUDFRONT_DISTRIBUTION_ID`` is not set in the environment.
     """
     logger.info("Starting CloudFront cache invalidation...")
     response = cloudfront.create_invalidation(
-        DistributionId=os.environ["CLOUDFRONT_DISTRIBUTION_ID"],
+        DistributionId=distribution_id,
         InvalidationBatch={
             "Paths": {"Quantity": 1, "Items": ["/*"]},
             "CallerReference": str(int(time.time())),
@@ -139,24 +152,26 @@ def main() -> int:
         ``0`` on success, ``1`` if any step fails.
     """
     logger = _setup_logger()
+    environemnt_variables = _fetch_env_variables()
     try:
         logger.info("Starting application deploy to S3")
-        aws_access_key_id = os.environ["AWS_ACCESS_KEY_ID"]
-        aws_secret_access_key = os.environ["AWS_SECRET_ACCESS_KEY"]
         credentials = dict[str, str](
-            region_name=os.environ["AWS_REGION"],
-            aws_access_key_id=aws_access_key_id,
-            aws_secret_access_key=aws_secret_access_key,
+            region_name=environemnt_variables["aws_region"],
+            aws_access_key_id=environemnt_variables["aws_access_key_id"],
+            aws_secret_access_key=environemnt_variables["aws_secret_access_key"],
         )
 
-        dist_dir = _get_dist_dir()
         _upload_to_s3(
             boto3.client(_CLIENT_TYPE, **credentials),
-            os.environ["AWS_S3_BUCKET_NAME"],
-            dist_dir,
+            environemnt_variables["aws_s3_bucket_name"],
+            environemnt_variables["dist_path"],
             logger,
         )
-        _invalidate_cloudfront(boto3.client("cloudfront", **credentials), logger)
+        _invalidate_cloudfront(
+            boto3.client("cloudfront", **credentials),
+            environemnt_variables["cloudfront_distribution_id"],
+            logger,
+        )
         return 0
     except Exception as e:
         # Avoid logging exception strings to reduce chances
