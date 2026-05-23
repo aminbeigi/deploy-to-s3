@@ -183,7 +183,7 @@ def main() -> int:
     logger = _setup_logger()
     environment_variables = _fetch_env_variables()
     try:
-        logger.info("Starting application deploy to S3")
+        logger.info("Starting application deploy-to-s3")
         _upload_to_s3(
             boto3.client(
                 _CLIENT_TYPE,

@@ -14,29 +14,32 @@ These instructions will get you a copy of the project up and running on your loc
 
 ### Installing
 
-Clone the repository and install dependencies.
+1. Clone the repository:
 
 ```
 git clone https://github.com/aminbeigi/deploy-to-s3.git
 cd deploy-to-s3
+```
+
+2. Install dependencies:
+
+```
 uv sync
 ```
 
-Copy the environment template and fill in your AWS values (`.env` is gitignored).
+3. Copy the environment template (`.env` is gitignored):
 
 ```
 cp .env_template .env
 ```
 
-Edit `.env` with your keys, region, bucket, and CloudFront distribution ID.
+4. Edit `.env` with your AWS keys, region, bucket, and CloudFront distribution ID.
 
-Run a local deploy (requires a built `dist/` directory at the repo root, or set `DIST_PATH`):
+5. Run a local deploy (expects `dist/` at the repo root; set `DIST_PATH` if your build output is elsewhere):
 
 ```
 uv run --env-file .env python -m deploy_to_s3
 ```
-
-Override the assets path when your build output lives elsewhere:
 
 ```
 DIST_PATH=/path/to/dist uv run --env-file .env python -m deploy_to_s3
