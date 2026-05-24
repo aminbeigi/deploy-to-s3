@@ -181,8 +181,8 @@ def main() -> int:
         ``0`` on success, ``1`` if any step fails.
     """
     logger = _setup_logger()
-    environment_variables = _fetch_env_variables()
     try:
+        environment_variables = _fetch_env_variables()
         logger.info("Starting application deploy-to-s3")
         _upload_to_s3(
             boto3.client(

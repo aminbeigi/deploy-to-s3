@@ -4,7 +4,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from deploy_to_s3.deploy import (
-    _get_dist_dir,
+    EnvironmentConfig,
+    _fetch_env_variables,
     _invalidate_cloudfront,
     _upload_to_s3,
     main,
@@ -20,28 +21,34 @@ def aws_env(monkeypatch):
     monkeypatch.setenv("CLOUDFRONT_DISTRIBUTION_ID", "E1234567890")
 
 
-def test_get_dist_dir_raises_when_missing(tmp_path):
+def test_fetch_env_variables_raises_when_dist_missing(tmp_path, aws_env):
     with pytest.raises(FileNotFoundError, match="Dist directory not found"):
-        _get_dist_dir(_base=tmp_path)
+        _fetch_env_variables()
 
 
-def test_get_dist_dir_uses_default_dist_when_present(tmp_path):
-    dist = tmp_path / "dist"
-    dist.mkdir()
-    assert _get_dist_dir(_base=tmp_path) == dist
-
-
-def test_get_dist_dir_uses_dist_path_env_var(tmp_path, monkeypatch):
+def test_fetch_env_variables_uses_dist_path_env_var(tmp_path, monkeypatch, aws_env):
     dist = tmp_path / "out"
     dist.mkdir()
     monkeypatch.setenv("DIST_PATH", str(dist))
-    assert _get_dist_dir() == dist
+    config = _fetch_env_variables()
+    assert config.dist_path == dist
+    assert isinstance(config, EnvironmentConfig)
 
 
-def test_get_dist_dir_dist_path_env_var_raises_when_missing(tmp_path, monkeypatch):
+def test_fetch_env_variables_dist_path_raises_when_missing(
+    tmp_path, monkeypatch, aws_env
+):
     monkeypatch.setenv("DIST_PATH", str(tmp_path / "nonexistent"))
     with pytest.raises(FileNotFoundError, match="Dist directory not found"):
-        _get_dist_dir()
+        _fetch_env_variables()
+
+
+def test_fetch_env_variables_raises_when_required_env_missing(tmp_path, monkeypatch):
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    monkeypatch.setenv("DIST_PATH", str(dist))
+    with pytest.raises(EnvironmentError, match="environment variables are not set"):
+        _fetch_env_variables()
 
 
 def test_upload_to_s3_uploads_all_files_with_keys(tmp_path):
@@ -91,13 +98,12 @@ def test_upload_to_s3_omits_extra_args_when_content_type_unknown(tmp_path):
     assert kwargs["ExtraArgs"] == {}
 
 
-def test_invalidate_cloudfront_creates_wildcard_invalidation(monkeypatch):
-    monkeypatch.setenv("CLOUDFRONT_DISTRIBUTION_ID", "E1234567890")
+def test_invalidate_cloudfront_creates_wildcard_invalidation():
     mock_cf = MagicMock()
     mock_cf.create_invalidation.return_value = {"Invalidation": {"Id": "INV123"}}
     logger = logging.getLogger("test_invalidate_cloudfront")
 
-    _invalidate_cloudfront(mock_cf, logger)
+    _invalidate_cloudfront(mock_cf, "E1234567890", logger)
 
     mock_cf.create_invalidation.assert_called_once()
     kwargs = mock_cf.create_invalidation.call_args.kwargs
@@ -166,5 +172,5 @@ def test_main_returns_1_when_aws_env_missing(
         exit_code = main()
 
     assert exit_code == 1
-    assert "Deploy failed with exception type: KeyError" in caplog.text
+    assert "Deploy failed with exception type: OSError" in caplog.text
     mock_boto_client.assert_not_called()
