@@ -109,8 +109,8 @@ def _upload_to_s3(
         bucket_name: Target S3 bucket name.
         dist_dir: Local directory whose files are uploaded recursively.
     """
-    logger.info(f"Starting S3 upload: file_count={len(files)}...")
     files = [path for path in dist_dir.rglob("*") if not path.is_dir()]
+    logger.info(f"Starting S3 upload: file_count={len(files)}...")
     upload_start = time.time()
     for file_path in files:
         s3_key = file_path.relative_to(dist_dir).as_posix()
@@ -135,6 +135,9 @@ def _invalidate_cloudfront(
         cloudfront: A boto3 CloudFront client (or compatible mock) with a
             ``create_invalidation`` method.
         distribution_id: The CloudFront distribution ID to invalidate.
+
+    Raises:
+        RuntimeError: If the CloudFront API returns a non-201 status code.
     """
     logger.info("Starting CloudFront cache invalidation...")
     response = cloudfront.create_invalidation(
@@ -144,8 +147,15 @@ def _invalidate_cloudfront(
             "CallerReference": str(int(time.time())),
         },
     )
-    _ = response["Invalidation"]["Id"]
-    logger.info("Successfully completed CloudFront cache invalidation")
+    status_code = response["ResponseMetadata"]["HTTPStatusCode"]
+    invalidation_id = response.get("Invalidation", {}).get("Id", "unknown")
+    if status_code != 201:
+        raise RuntimeError(
+            f"CloudFront invalidation failed with status {status_code}: id={invalidation_id}"
+        )
+    logger.info(
+        f"Successfully completed CloudFront cache invalidation: id={invalidation_id}"
+    )
 
 
 def run() -> None:
