@@ -68,6 +68,7 @@ def _fetch_env_variables() -> EnvironmentConfig:
         EnvironmentError: If any required environment variable is missing or empty.
         FileNotFoundError: If the resolved distribution directory does not exist.
     """
+    logger.info("Starting environment variable fetch...")
     missing = [name for name in _REQUIRED_ENV if not os.environ.get(name)]
     if missing:
         raise EnvironmentError(
@@ -82,6 +83,7 @@ def _fetch_env_variables() -> EnvironmentConfig:
     if not dist_dir.exists():
         raise FileNotFoundError(f"Dist directory not found: {dist_dir}")
 
+    logger.info("Successfully fetched environment variables")
     return EnvironmentConfig(
         aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
         aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
@@ -107,8 +109,8 @@ def _upload_to_s3(
         bucket_name: Target S3 bucket name.
         dist_dir: Local directory whose files are uploaded recursively.
     """
-    files = [path for path in dist_dir.rglob("*") if not path.is_dir()]
     logger.info(f"Starting S3 upload: file_count={len(files)}...")
+    files = [path for path in dist_dir.rglob("*") if not path.is_dir()]
     upload_start = time.time()
     for file_path in files:
         s3_key = file_path.relative_to(dist_dir).as_posix()
@@ -161,7 +163,7 @@ def run() -> None:
 
     * ``DIST_PATH`` — override the local distribution directory.
     """
-    logger.info("Starting deploy-to-s3")
+    logger.info("Starting deploy-to-s3...")
     environment_variables = _fetch_env_variables()
     _upload_to_s3(
         boto3.client(
