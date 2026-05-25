@@ -4,20 +4,23 @@ This module uploads build artifacts from a local ``dist/`` directory to an S3
 bucket and optionally invalidates a CloudFront distribution cache.
 """
 
-import logging
 import mimetypes
 import os
 import sys
 import time
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import boto3
 
+from deploy_to_s3.logger import configure_logging, get_logger
+
 if TYPE_CHECKING:
     from botocore.client import BaseClient
     from mypy_boto3_s3 import S3Client
+
+logger = get_logger(__name__)
 
 _CLIENT_TYPE = "s3"
 _CLOUDFRONT_CLIENT_TYPE = "cloudfront"
@@ -89,28 +92,10 @@ def _fetch_env_variables() -> EnvironmentConfig:
     )
 
 
-def _setup_logger() -> logging.Logger:
-    """Configure and return the application logger.
-
-    Logging is configured once via :func:`logging.basicConfig` to emit INFO-level
-    records to stdout with a timestamp, level, source location, and message.
-
-    Returns:
-        The root logger instance used for deploy operations.
-    """
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)-s - %(filename)s:%(lineno)d - %(message)s",
-        stream=sys.stdout,
-    )
-    return logging.getLogger()
-
-
 def _upload_to_s3(
     s3: "S3Client",
     bucket_name: str,
     dist_dir: Path,
-    logger: logging.Logger,
 ) -> None:
     """Upload all files under ``dist_dir`` to the given S3 bucket.
 
@@ -121,7 +106,6 @@ def _upload_to_s3(
         s3: A boto3 S3 client (or compatible mock) with an ``upload_file`` method.
         bucket_name: Target S3 bucket name.
         dist_dir: Local directory whose files are uploaded recursively.
-        logger: Logger used for progress and completion messages.
     """
     files = [path for path in dist_dir.rglob("*") if not path.is_dir()]
     logger.info(f"Starting S3 upload: file_count={len(files)}...")
@@ -140,7 +124,8 @@ def _upload_to_s3(
 
 
 def _invalidate_cloudfront(
-    cloudfront: "BaseClient", distribution_id: str, logger: logging.Logger
+    cloudfront: "BaseClient",
+    distribution_id: str,
 ) -> None:
     """Invalidate all paths on the configured CloudFront distribution.
 
@@ -148,7 +133,6 @@ def _invalidate_cloudfront(
         cloudfront: A boto3 CloudFront client (or compatible mock) with a
             ``create_invalidation`` method.
         distribution_id: The CloudFront distribution ID to invalidate.
-        logger: Logger used for progress and completion messages.
     """
     logger.info("Starting CloudFront cache invalidation...")
     response = cloudfront.create_invalidation(
@@ -162,8 +146,8 @@ def _invalidate_cloudfront(
     logger.info("Successfully completed CloudFront cache invalidation")
 
 
-def main() -> int:
-    """Run the deploy workflow: upload to S3 and invalidate CloudFront.
+def run() -> None:
+    """Orchestrate the deploy workflow: upload to S3 and invalidate CloudFront.
 
     Expects the following environment variables:
 
@@ -176,38 +160,43 @@ def main() -> int:
     Optional:
 
     * ``DIST_PATH`` — override the local distribution directory.
-
-    Returns:
-        ``0`` on success, ``1`` if any step fails.
     """
-    logger = _setup_logger()
+    logger.info("Starting deploy-to-s3")
+    environment_variables = _fetch_env_variables()
+    _upload_to_s3(
+        boto3.client(
+            _CLIENT_TYPE,
+            region_name=environment_variables.aws_region,
+            aws_access_key_id=environment_variables.aws_access_key_id,
+            aws_secret_access_key=environment_variables.aws_secret_access_key,
+        ),
+        environment_variables.aws_s3_bucket_name,
+        environment_variables.dist_path,
+    )
+    _invalidate_cloudfront(
+        boto3.client(
+            _CLOUDFRONT_CLIENT_TYPE,
+            region_name=environment_variables.aws_region,
+            aws_access_key_id=environment_variables.aws_access_key_id,
+            aws_secret_access_key=environment_variables.aws_secret_access_key,
+        ),
+        environment_variables.cloudfront_distribution_id,
+    )
+    logger.info("Successfully deployed to S3")
+
+
+def main() -> int:
+    """Run the application and return a process exit code."""
+    configure_logging()
     try:
-        environment_variables = _fetch_env_variables()
-        logger.info("Starting application deploy-to-s3")
-        _upload_to_s3(
-            boto3.client(
-                _CLIENT_TYPE,
-                region_name=environment_variables.aws_region,
-                aws_access_key_id=environment_variables.aws_access_key_id,
-                aws_secret_access_key=environment_variables.aws_secret_access_key,
-            ),
-            environment_variables.aws_s3_bucket_name,
-            environment_variables.dist_path,
-            logger,
-        )
-        _invalidate_cloudfront(
-            boto3.client(
-                _CLOUDFRONT_CLIENT_TYPE,
-                region_name=environment_variables.aws_region,
-                aws_access_key_id=environment_variables.aws_access_key_id,
-                aws_secret_access_key=environment_variables.aws_secret_access_key,
-            ),
-            environment_variables.cloudfront_distribution_id,
-            logger,
-        )
+        run()
         return 0
     except Exception as e:
-        # Avoid logging exception strings to reduce chances
-        # of leaking sensitive values in public CI logs.
-        logger.error(f"Deploy failed with exception type: {type(e).__name__}")
+        # Log only the exception type — never the message or traceback, which
+        # may contain env var values, file paths, or boto3 error details.
+        logger.error(f"Failed deploy: {type(e).__name__}")
         return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
