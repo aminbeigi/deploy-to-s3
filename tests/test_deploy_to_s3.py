@@ -169,7 +169,9 @@ class TestMain:
         monkeypatch.setenv("DIST_PATH", str(dist_dir))
         mock_s3, mock_cf = MagicMock(), MagicMock()
         mock_cf.create_invalidation.return_value = {"Invalidation": {"Id": "INV1"}}
-        mock_boto_client.side_effect = lambda svc, **_: mock_s3 if svc == "s3" else mock_cf
+        mock_boto_client.side_effect = lambda svc, **_: (
+            mock_s3 if svc == "s3" else mock_cf
+        )
 
         assert main() == 0
         mock_s3.upload_file.assert_called_once()
