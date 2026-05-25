@@ -133,17 +133,46 @@ class TestUploadToS3:
 class TestInvalidateCloudFront:
     """Validate that CloudFront cache invalidation targets all paths."""
 
-    def test_creates_wildcard_invalidation(self) -> None:
-        """Issue a wildcard invalidation so all cached objects are purged."""
-        mock_cf = MagicMock()
-        mock_cf.create_invalidation.return_value = {"Invalidation": {"Id": "INV123"}}
+    def test_creates_wildcard_invalidation(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Issue a wildcard invalidation so all cached objects are purged and log the ID.
 
-        _invalidate_cloudfront(mock_cf, "E1234567890")
+        Args:
+            caplog: pytest fixture for capturing log output.
+        """
+        mock_cf = MagicMock()
+        mock_cf.create_invalidation.return_value = {
+            "Invalidation": {"Id": "INV123"},
+            "ResponseMetadata": {"HTTPStatusCode": 201},
+        }
+
+        with caplog.at_level(logging.INFO):
+            _invalidate_cloudfront(mock_cf, "E1234567890")
 
         kwargs = mock_cf.create_invalidation.call_args.kwargs
         assert kwargs["DistributionId"] == "E1234567890"
         assert kwargs["InvalidationBatch"]["Paths"]["Items"] == ["/*"]
         assert kwargs["InvalidationBatch"]["Paths"]["Quantity"] == 1
+        assert "id=INV123" in caplog.text
+
+    def test_raises_when_status_code_not_201(self) -> None:
+        """Raise RuntimeError when the CloudFront API returns a non-201 status code.
+
+        Args:
+            None
+        """
+        mock_cf = MagicMock()
+        mock_cf.create_invalidation.return_value = {
+            "Invalidation": {"Id": "INV123"},
+            "ResponseMetadata": {"HTTPStatusCode": 500},
+        }
+
+        with pytest.raises(
+            RuntimeError,
+            match=r"CloudFront invalidation failed with status 500: id=INV123",
+        ):
+            _invalidate_cloudfront(mock_cf, "E1234567890")
 
 
 class TestMain:
@@ -168,7 +197,10 @@ class TestMain:
         (dist_dir / "index.html").write_text("hello")
         monkeypatch.setenv("DIST_PATH", str(dist_dir))
         mock_s3, mock_cf = MagicMock(), MagicMock()
-        mock_cf.create_invalidation.return_value = {"Invalidation": {"Id": "INV1"}}
+        mock_cf.create_invalidation.return_value = {
+            "Invalidation": {"Id": "INV1"},
+            "ResponseMetadata": {"HTTPStatusCode": 201},
+        }
         mock_boto_client.side_effect = lambda svc, **_: (
             mock_s3 if svc == "s3" else mock_cf
         )

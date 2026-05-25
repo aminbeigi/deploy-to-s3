@@ -21,21 +21,20 @@ git clone https://github.com/aminbeigi/deploy-to-s3.git
 cd deploy-to-s3
 ```
 
-2. Install dependencies:
+1. Install dependencies:
 
 ```
 uv sync
 ```
 
-3. Copy the environment template (`.env` is gitignored):
+1. Copy the environment template (`.env` is gitignored):
 
 ```
 cp .env_template .env
 ```
 
-4. Edit `.env` with your AWS keys, region, bucket, and CloudFront distribution ID.
-
-5. Run a local deploy (expects `dist/` at the repo root; set `DIST_PATH` if your build output is elsewhere):
+1. Edit `.env` with your AWS keys, region, bucket, and CloudFront distribution ID.
+2. Run a local deploy (expects `dist/` at the repo root; set `DIST_PATH` if your build output is elsewhere):
 
 ```
 uv run --env-file .env python -m deploy_to_s3
@@ -77,7 +76,7 @@ jobs:
           node-version: 20
       - run: npm ci && npm run build   # produces dist/
 
-      - uses: aminbeigi/deploy-to-s3@v1
+      - uses: aminbeigi/deploy-to-s3@main
         with:
           dist-path: dist
           aws-region: ${{ secrets.AWS_REGION }}
@@ -88,6 +87,7 @@ jobs:
 ```
 
 In the consumer repo, add these as repository secrets (Settings → Secrets and variables → Actions): 
+
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`
 - `AWS_REGION`
@@ -95,6 +95,7 @@ In the consumer repo, add these as repository secrets (Settings → Secrets and 
 - `CLOUDFRONT_DISTRIBUTION_ID`
 
 ## Authors
+
 - Amin Beigi
 
 ## License

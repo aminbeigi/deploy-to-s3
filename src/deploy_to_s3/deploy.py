@@ -68,6 +68,7 @@ def _fetch_env_variables() -> EnvironmentConfig:
         EnvironmentError: If any required environment variable is missing or empty.
         FileNotFoundError: If the resolved distribution directory does not exist.
     """
+    logger.info("Starting environment variable fetch...")
     missing = [name for name in _REQUIRED_ENV if not os.environ.get(name)]
     if missing:
         raise EnvironmentError(
@@ -82,6 +83,7 @@ def _fetch_env_variables() -> EnvironmentConfig:
     if not dist_dir.exists():
         raise FileNotFoundError(f"Dist directory not found: {dist_dir}")
 
+    logger.info("Successfully fetched environment variables")
     return EnvironmentConfig(
         aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
         aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
@@ -133,6 +135,9 @@ def _invalidate_cloudfront(
         cloudfront: A boto3 CloudFront client (or compatible mock) with a
             ``create_invalidation`` method.
         distribution_id: The CloudFront distribution ID to invalidate.
+
+    Raises:
+        RuntimeError: If the CloudFront API returns a non-201 status code.
     """
     logger.info("Starting CloudFront cache invalidation...")
     response = cloudfront.create_invalidation(
@@ -142,8 +147,15 @@ def _invalidate_cloudfront(
             "CallerReference": str(int(time.time())),
         },
     )
-    _ = response["Invalidation"]["Id"]
-    logger.info("Successfully completed CloudFront cache invalidation")
+    status_code = response["ResponseMetadata"]["HTTPStatusCode"]
+    invalidation_id = response.get("Invalidation", {}).get("Id", "unknown")
+    if status_code != 201:
+        raise RuntimeError(
+            f"CloudFront invalidation failed with status {status_code}: id={invalidation_id}"
+        )
+    logger.info(
+        f"Successfully completed CloudFront cache invalidation: id={invalidation_id}"
+    )
 
 
 def run() -> None:
@@ -161,7 +173,7 @@ def run() -> None:
 
     * ``DIST_PATH`` — override the local distribution directory.
     """
-    logger.info("Starting deploy-to-s3")
+    logger.info("Starting deploy-to-s3...")
     environment_variables = _fetch_env_variables()
     _upload_to_s3(
         boto3.client(
