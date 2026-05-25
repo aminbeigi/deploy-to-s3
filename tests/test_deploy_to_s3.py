@@ -60,9 +60,8 @@ def test_upload_to_s3_uploads_all_files_with_keys(tmp_path):
     (assets / "app.js").write_text("console.log(1)")
 
     mock_s3 = MagicMock()
-    logger = logging.getLogger("test_upload_to_s3")
 
-    _upload_to_s3(mock_s3, "my-bucket", dist, logger)
+    _upload_to_s3(mock_s3, "my-bucket", dist)
 
     assert mock_s3.upload_file.call_count == 2
     keys = {call.args[2] for call in mock_s3.upload_file.call_args_list}
@@ -76,9 +75,8 @@ def test_upload_to_s3_sets_content_type_when_known(tmp_path):
     html_file.write_text("<html></html>")
 
     mock_s3 = MagicMock()
-    logger = logging.getLogger("test_upload_content_type")
 
-    _upload_to_s3(mock_s3, "my-bucket", dist, logger)
+    _upload_to_s3(mock_s3, "my-bucket", dist)
 
     _, kwargs = mock_s3.upload_file.call_args
     assert kwargs["ExtraArgs"]["ContentType"] == "text/html"
@@ -90,9 +88,8 @@ def test_upload_to_s3_omits_extra_args_when_content_type_unknown(tmp_path):
     (dist / "noextension").write_bytes(b"\x00\x01")
 
     mock_s3 = MagicMock()
-    logger = logging.getLogger("test_upload_no_content_type")
 
-    _upload_to_s3(mock_s3, "my-bucket", dist, logger)
+    _upload_to_s3(mock_s3, "my-bucket", dist)
 
     _, kwargs = mock_s3.upload_file.call_args
     assert kwargs["ExtraArgs"] == {}
@@ -101,9 +98,8 @@ def test_upload_to_s3_omits_extra_args_when_content_type_unknown(tmp_path):
 def test_invalidate_cloudfront_creates_wildcard_invalidation():
     mock_cf = MagicMock()
     mock_cf.create_invalidation.return_value = {"Invalidation": {"Id": "INV123"}}
-    logger = logging.getLogger("test_invalidate_cloudfront")
 
-    _invalidate_cloudfront(mock_cf, "E1234567890", logger)
+    _invalidate_cloudfront(mock_cf, "E1234567890")
 
     mock_cf.create_invalidation.assert_called_once()
     kwargs = mock_cf.create_invalidation.call_args.kwargs
@@ -122,9 +118,13 @@ def test_main_success(mock_boto_client, tmp_path, monkeypatch, aws_env, caplog):
     mock_s3 = MagicMock()
     mock_cf = MagicMock()
     mock_cf.create_invalidation.return_value = {"Invalidation": {"Id": "INV1"}}
-    mock_boto_client.side_effect = lambda service, **_: (
-        mock_s3 if service == "s3" else mock_cf
-    )
+
+    def _boto_side_effect(service, **_):
+        if service == "s3":
+            return mock_s3
+        return mock_cf
+
+    mock_boto_client.side_effect = _boto_side_effect
 
     with caplog.at_level(logging.INFO):
         exit_code = main()
@@ -156,7 +156,7 @@ def test_main_returns_1_when_dist_missing(
         exit_code = main()
 
     assert exit_code == 1
-    assert "Deploy failed with exception type: FileNotFoundError" in caplog.text
+    assert "Failed deploy: FileNotFoundError" in caplog.text
     mock_boto_client.assert_not_called()
 
 
@@ -172,5 +172,5 @@ def test_main_returns_1_when_aws_env_missing(
         exit_code = main()
 
     assert exit_code == 1
-    assert "Deploy failed with exception type: OSError" in caplog.text
+    assert "Failed deploy: OSError" in caplog.text
     mock_boto_client.assert_not_called()
