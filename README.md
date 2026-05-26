@@ -1,6 +1,23 @@
 # deploy-to-s3
 
-A reusable GitHub Action that uploads a built `dist/` directory to an S3 bucket and invalidates a CloudFront distribution. You can also run the same deploy logic locally for development and testing.
+A reusable GitHub Action that uploads a built `dist/` directory to an S3 bucket and invalidates a CloudFront distribution.
+
+Point it at your frontend build output - usually `dist/` from `npm run build` or similar. It uploads everything inside. Deploy fails fast if `dist/` is empty or missing `index.html` at the root, so a forgotten build step is caught before anything hits S3. You also need any JS, CSS, media, and other assets your app references.
+
+A full frontend build often looks like:
+
+```text
+dist/
+  index.html
+  assets/
+    index-a1b2c3.js
+    index-d4e5f6.css
+    logo.png
+    hero.webp
+  media/
+    promo.mp4
+  favicon.ico
+```
 
 ## Getting Started
 

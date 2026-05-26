@@ -25,6 +25,7 @@ logger = get_logger(__name__)
 _CLIENT_TYPE = "s3"
 _CLOUDFRONT_CLIENT_TYPE = "cloudfront"
 _DIST_DIR_NAME = "dist"
+_INDEX_HTML_NAME = "index.html"
 _REQUIRED_ENV = (
     "CLOUDFRONT_DISTRIBUTION_ID",
     "AWS_ACCESS_KEY_ID",
@@ -94,6 +95,40 @@ def _fetch_env_variables() -> EnvironmentConfig:
     )
 
 
+def _list_dist_files(dist_dir: Path) -> list[Path]:
+    """Return every file path under ``dist_dir``, recursively.
+
+    Args:
+        dist_dir: Local distribution directory to scan.
+
+    Returns:
+        Paths to regular files only (directories are excluded).
+    """
+    return [path for path in dist_dir.rglob("*") if not path.is_dir()]
+
+
+def _validate_dist_directory(dist_dir: Path) -> None:
+    """Validate that the distribution directory is ready to deploy.
+
+    Catches empty builds and missing entry HTML before any S3 upload runs.
+
+    Args:
+        dist_dir: Local directory whose contents will be uploaded.
+
+    Raises:
+        ValueError: If the directory contains no files or is missing
+            ``index.html`` at the directory root.
+    """
+    logger.info("Starting dist directory validation...")
+    files = _list_dist_files(dist_dir)
+    if not files:
+        raise ValueError("Dist directory contains no files")
+    index_html = dist_dir / _INDEX_HTML_NAME
+    if not index_html.is_file():
+        raise ValueError("Dist directory is missing index.html at the root")
+    logger.info("Successfully validated dist directory")
+
+
 def _upload_to_s3(
     s3: "S3Client",
     bucket_name: str,
@@ -109,7 +144,7 @@ def _upload_to_s3(
         bucket_name: Target S3 bucket name.
         dist_dir: Local directory whose files are uploaded recursively.
     """
-    files = [path for path in dist_dir.rglob("*") if not path.is_dir()]
+    files = _list_dist_files(dist_dir)
     logger.info(f"Starting S3 upload: file_count={len(files)}...")
     upload_start = time.time()
     for file_path in files:
@@ -175,6 +210,7 @@ def run() -> None:
     """
     logger.info("Starting deploy-to-s3...")
     environment_variables = _fetch_env_variables()
+    _validate_dist_directory(environment_variables.dist_path)
     _upload_to_s3(
         boto3.client(
             _CLIENT_TYPE,

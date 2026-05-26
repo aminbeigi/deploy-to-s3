@@ -15,6 +15,7 @@ from deploy_to_s3.deploy import (
     _fetch_env_variables,
     _invalidate_cloudfront,
     _upload_to_s3,
+    _validate_dist_directory,
     main,
 )
 
@@ -45,6 +46,7 @@ def dist_dir(tmp_path: Path) -> Path:
     """
     dist = tmp_path / "dist"
     dist.mkdir()
+    (dist / "index.html").write_text("<html></html>")
     return dist
 
 
@@ -93,6 +95,41 @@ class TestFetchEnvVariables:
         assert isinstance(config, EnvironmentConfig)
         assert config.dist_path == dist_dir
         assert config.aws_region == "us-east-1"
+
+
+class TestValidateDistDirectory:
+    """Validate dist/ guards before upload."""
+
+    def test_raises_when_dist_has_no_files(self, dist_dir: Path) -> None:
+        """Raise ValueError when the dist directory exists but has no files.
+
+        Args:
+            dist_dir: Temporary dist directory with only the default index.html removed.
+        """
+        (dist_dir / "index.html").unlink()
+        with pytest.raises(ValueError, match="contains no files"):
+            _validate_dist_directory(dist_dir)
+
+    def test_raises_when_index_html_missing(self, dist_dir: Path) -> None:
+        """Raise ValueError when files exist but root index.html is absent.
+
+        Args:
+            dist_dir: Temporary dist directory with assets but no index.html.
+        """
+        (dist_dir / "index.html").unlink()
+        assets = dist_dir / "assets"
+        assets.mkdir()
+        (assets / "app.js").write_text("console.log(1)")
+        with pytest.raises(ValueError, match="missing index.html"):
+            _validate_dist_directory(dist_dir)
+
+    def test_passes_when_index_html_at_root(self, dist_dir: Path) -> None:
+        """Accept a dist tree that includes index.html at the root.
+
+        Args:
+            dist_dir: Temporary dist directory with the default index.html.
+        """
+        _validate_dist_directory(dist_dir)
 
 
 class TestUploadToS3:
@@ -237,6 +274,58 @@ class TestMain:
         with caplog.at_level(logging.ERROR):
             assert main() == 1
         assert "Failed deploy: FileNotFoundError" in caplog.text
+        mock_boto_client.assert_not_called()
+
+    @patch("deploy_to_s3.deploy.boto3.client")
+    def test_returns_1_when_dist_has_no_files(
+        self,
+        mock_boto_client: MagicMock,
+        dist_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        aws_env: None,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Return 1 without calling AWS when dist contains no files.
+
+        Args:
+            mock_boto_client: Patched boto3.client, asserted to never be called.
+            dist_dir: Temporary dist directory cleared of all files.
+            monkeypatch: pytest fixture for patching environment variables.
+            aws_env: Fixture that sets all required AWS environment variables.
+            caplog: pytest fixture for capturing log output.
+        """
+        (dist_dir / "index.html").unlink()
+        monkeypatch.setenv("DIST_PATH", str(dist_dir))
+        with caplog.at_level(logging.ERROR):
+            assert main() == 1
+        assert "Failed deploy: ValueError" in caplog.text
+        mock_boto_client.assert_not_called()
+
+    @patch("deploy_to_s3.deploy.boto3.client")
+    def test_returns_1_when_index_html_missing(
+        self,
+        mock_boto_client: MagicMock,
+        dist_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        aws_env: None,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Return 1 without calling AWS when root index.html is missing.
+
+        Args:
+            mock_boto_client: Patched boto3.client, asserted to never be called.
+            dist_dir: Temporary dist directory with assets but no index.html.
+            monkeypatch: pytest fixture for patching environment variables.
+            aws_env: Fixture that sets all required AWS environment variables.
+            caplog: pytest fixture for capturing log output.
+        """
+        (dist_dir / "index.html").unlink()
+        (dist_dir / "assets").mkdir()
+        (dist_dir / "assets" / "app.js").write_text("console.log(1)")
+        monkeypatch.setenv("DIST_PATH", str(dist_dir))
+        with caplog.at_level(logging.ERROR):
+            assert main() == 1
+        assert "Failed deploy: ValueError" in caplog.text
         mock_boto_client.assert_not_called()
 
     @patch("deploy_to_s3.deploy.boto3.client")
