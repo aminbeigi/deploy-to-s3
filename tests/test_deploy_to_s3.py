@@ -10,10 +10,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from deploy_to_s3.constants.models import DeploySummary, EnvironmentConfig
 from deploy_to_s3.deploy import (
-    EnvironmentConfig,
     _fetch_env_variables,
     _invalidate_cloudfront,
+    _log_deploy_summary,
     _upload_to_s3,
     _validate_dist_directory,
     main,
@@ -146,9 +147,11 @@ class TestUploadToS3:
         (dist_dir / "assets" / "app.js").write_text("console.log(1)")
         mock_s3 = MagicMock()
 
-        _upload_to_s3(mock_s3, "my-bucket", dist_dir)
+        stats = _upload_to_s3(mock_s3, "my-bucket", dist_dir)
 
         assert mock_s3.upload_file.call_count == 2
+        assert stats.file_count == 2
+        assert stats.bytes_uploaded > 0
         keys = {call.args[2] for call in mock_s3.upload_file.call_args_list}
         assert keys == {"index.html", "assets/app.js"}
 
@@ -173,7 +176,7 @@ class TestInvalidateCloudFront:
     def test_creates_wildcard_invalidation(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Issue a wildcard invalidation so all cached objects are purged and log the ID.
+        """Issue a wildcard invalidation so all cached objects are purged.
 
         Args:
             caplog: pytest fixture for capturing log output.
@@ -185,13 +188,14 @@ class TestInvalidateCloudFront:
         }
 
         with caplog.at_level(logging.INFO):
-            _invalidate_cloudfront(mock_cf, "E1234567890")
+            invalidation_id = _invalidate_cloudfront(mock_cf, "E1234567890")
 
+        assert invalidation_id == "INV123"
         kwargs = mock_cf.create_invalidation.call_args.kwargs
         assert kwargs["DistributionId"] == "E1234567890"
         assert kwargs["InvalidationBatch"]["Paths"]["Items"] == ["/*"]
         assert kwargs["InvalidationBatch"]["Paths"]["Quantity"] == 1
-        assert "id=INV123" in caplog.text
+        assert "Successfully completed CloudFront cache invalidation" in caplog.text
 
     def test_raises_when_status_code_not_201(self) -> None:
         """Raise RuntimeError when the CloudFront API returns a non-201 status code.
@@ -212,6 +216,32 @@ class TestInvalidateCloudFront:
             _invalidate_cloudfront(mock_cf, "E1234567890")
 
 
+class TestLogDeploySummary:
+    """Validate deploy summary logging."""
+
+    def test_logs_file_count_and_bytes(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Log file count, bytes uploaded, and duration without secret values.
+
+        Args:
+            caplog: pytest fixture for capturing log output.
+        """
+        summary = DeploySummary(
+            file_count=3,
+            bytes_uploaded=2048,
+            upload_duration_seconds=1.25,
+        )
+        with caplog.at_level(logging.INFO):
+            _log_deploy_summary(summary)
+
+        assert "Deploy summary:" in caplog.text
+        assert "Files uploaded: 3" in caplog.text
+        assert "Bytes uploaded: 2048" in caplog.text
+        assert "Upload duration: 1.25s" in caplog.text
+        assert "S3 bucket: REDACTED" in caplog.text
+        assert "CloudFront distribution: REDACTED" in caplog.text
+        assert "CloudFront invalidation: REDACTED" in caplog.text
+
+
 class TestMain:
     """Validate the main() entry point orchestration and error handling."""
 
@@ -222,6 +252,7 @@ class TestMain:
         dist_dir: Path,
         monkeypatch: pytest.MonkeyPatch,
         aws_env: None,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Return 0 and invoke both S3 upload and CloudFront invalidation on success.
 
@@ -230,6 +261,7 @@ class TestMain:
             dist_dir: Temporary dist directory containing a single file to upload.
             monkeypatch: pytest fixture for patching environment variables.
             aws_env: Fixture that sets all required AWS environment variables.
+            caplog: pytest fixture for capturing log output.
         """
         (dist_dir / "index.html").write_text("hello")
         monkeypatch.setenv("DIST_PATH", str(dist_dir))
@@ -242,9 +274,18 @@ class TestMain:
             mock_s3 if svc == "s3" else mock_cf
         )
 
-        assert main() == 0
+        with caplog.at_level(logging.INFO):
+            assert main() == 0
         mock_s3.upload_file.assert_called_once()
         mock_cf.create_invalidation.assert_called_once()
+        assert "Deploy summary:" in caplog.text
+        assert "Files uploaded: 1" in caplog.text
+        assert "S3 bucket: REDACTED" in caplog.text
+        assert "CloudFront distribution: REDACTED" in caplog.text
+        assert "CloudFront invalidation: REDACTED" in caplog.text
+        assert "test-bucket" not in caplog.text
+        assert "E1234567890" not in caplog.text
+        assert "INV1" not in caplog.text
         mock_boto_client.assert_any_call(
             "s3",
             region_name="us-east-1",

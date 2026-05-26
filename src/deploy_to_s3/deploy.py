@@ -8,12 +8,20 @@ import mimetypes
 import os
 import sys
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import boto3
 
+from deploy_to_s3.constants.literals import (
+    CLOUDFRONT_CLIENT_TYPE,
+    DEFAULT_DIST_DIR_NAME,
+    INDEX_HTML_NAME,
+    REDACTED,
+    REQUIRED_ENV_VAR_NAMES,
+    S3_CLIENT_TYPE,
+)
+from deploy_to_s3.constants.models import DeploySummary, EnvironmentConfig, UploadStats
 from deploy_to_s3.logger import configure_logging, get_logger
 
 if TYPE_CHECKING:
@@ -21,39 +29,6 @@ if TYPE_CHECKING:
     from mypy_boto3_s3 import S3Client
 
 logger = get_logger(__name__)
-
-_CLIENT_TYPE = "s3"
-_CLOUDFRONT_CLIENT_TYPE = "cloudfront"
-_DIST_DIR_NAME = "dist"
-_INDEX_HTML_NAME = "index.html"
-_REQUIRED_ENV = (
-    "CLOUDFRONT_DISTRIBUTION_ID",
-    "AWS_ACCESS_KEY_ID",
-    "AWS_SECRET_ACCESS_KEY",
-    "AWS_REGION",
-    "AWS_S3_BUCKET_NAME",
-)
-
-
-@dataclass(frozen=True)
-class EnvironmentConfig:
-    """Immutable container for deploy environment configuration.
-
-    Attributes:
-        aws_access_key_id: AWS access key ID for authentication.
-        aws_region: AWS region where the S3 bucket is hosted.
-        aws_s3_bucket_name: Name of the target S3 bucket.
-        aws_secret_access_key: AWS secret access key for authentication.
-        cloudfront_distribution_id: CloudFront distribution ID to invalidate after deploy.
-        dist_path: Resolved path to the local distribution directory to upload.
-    """
-
-    aws_access_key_id: str
-    aws_secret_access_key: str
-    aws_region: str
-    aws_s3_bucket_name: str
-    cloudfront_distribution_id: str
-    dist_path: Path
 
 
 def _fetch_env_variables() -> EnvironmentConfig:
@@ -70,7 +45,7 @@ def _fetch_env_variables() -> EnvironmentConfig:
         FileNotFoundError: If the resolved distribution directory does not exist.
     """
     logger.info("Starting environment variable fetch...")
-    missing = [name for name in _REQUIRED_ENV if not os.environ.get(name)]
+    missing = [name for name in REQUIRED_ENV_VAR_NAMES if not os.environ.get(name)]
     if missing:
         raise EnvironmentError(
             f"The following environment variables are not set: {missing}"
@@ -80,7 +55,7 @@ def _fetch_env_variables() -> EnvironmentConfig:
     if env_path:
         dist_dir = Path(env_path)
     else:
-        dist_dir = Path(__file__).resolve().parent.parent / _DIST_DIR_NAME
+        dist_dir = Path(__file__).resolve().parent.parent / DEFAULT_DIST_DIR_NAME
     if not dist_dir.exists():
         raise FileNotFoundError(f"Dist directory not found: {dist_dir}")
 
@@ -93,6 +68,25 @@ def _fetch_env_variables() -> EnvironmentConfig:
         cloudfront_distribution_id=os.environ["CLOUDFRONT_DISTRIBUTION_ID"],
         dist_path=dist_dir,
     )
+
+
+def _log_deploy_summary(summary: DeploySummary) -> None:
+    """Log a multi-line deploy summary to stdout and the log file.
+
+    Infrastructure identifiers (bucket, distribution, invalidation) are always
+    logged as :data:`REDACTED` so GitHub Actions job output never exposes
+    values passed in via repository secrets.
+
+    Args:
+        summary: Aggregated deploy metrics from upload and invalidation.
+    """
+    logger.info("Deploy summary:")
+    logger.info(f"  Files uploaded: {summary.file_count}")
+    logger.info(f"  Bytes uploaded: {summary.bytes_uploaded}")
+    logger.info(f"  Upload duration: {summary.upload_duration_seconds:.2f}s")
+    logger.info(f"  S3 bucket: {REDACTED}")
+    logger.info(f"  CloudFront distribution: {REDACTED}")
+    logger.info(f"  CloudFront invalidation: {REDACTED}")
 
 
 def _list_dist_files(dist_dir: Path) -> list[Path]:
@@ -123,7 +117,7 @@ def _validate_dist_directory(dist_dir: Path) -> None:
     files = _list_dist_files(dist_dir)
     if not files:
         raise ValueError("Dist directory contains no files")
-    index_html = dist_dir / _INDEX_HTML_NAME
+    index_html = dist_dir / INDEX_HTML_NAME
     if not index_html.is_file():
         raise ValueError("Dist directory is missing index.html at the root")
     logger.info("Successfully validated dist directory")
@@ -133,7 +127,7 @@ def _upload_to_s3(
     s3: "S3Client",
     bucket_name: str,
     dist_dir: Path,
-) -> None:
+) -> UploadStats:
     """Upload all files under ``dist_dir`` to the given S3 bucket.
 
     Each file is stored with an object key equal to its path relative to
@@ -143,8 +137,12 @@ def _upload_to_s3(
         s3: A boto3 S3 client (or compatible mock) with an ``upload_file`` method.
         bucket_name: Target S3 bucket name.
         dist_dir: Local directory whose files are uploaded recursively.
+
+    Returns:
+        Upload metrics including file count, total bytes, and duration.
     """
     files = _list_dist_files(dist_dir)
+    bytes_uploaded = sum(file_path.stat().st_size for file_path in files)
     logger.info(f"Starting S3 upload: file_count={len(files)}...")
     upload_start = time.time()
     for file_path in files:
@@ -158,18 +156,26 @@ def _upload_to_s3(
     logger.info(
         f"Successfully uploaded {len(files)} files to S3 in {upload_elapsed_s:.2f}s"
     )
+    return UploadStats(
+        file_count=len(files),
+        bytes_uploaded=bytes_uploaded,
+        upload_duration_seconds=upload_elapsed_s,
+    )
 
 
 def _invalidate_cloudfront(
     cloudfront: "BaseClient",
     distribution_id: str,
-) -> None:
+) -> str:
     """Invalidate all paths on the configured CloudFront distribution.
 
     Args:
         cloudfront: A boto3 CloudFront client (or compatible mock) with a
             ``create_invalidation`` method.
         distribution_id: The CloudFront distribution ID to invalidate.
+
+    Returns:
+        The CloudFront invalidation ID from the API response.
 
     Raises:
         RuntimeError: If the CloudFront API returns a non-201 status code.
@@ -188,9 +194,8 @@ def _invalidate_cloudfront(
         raise RuntimeError(
             f"CloudFront invalidation failed with status {status_code}: id={invalidation_id}"
         )
-    logger.info(
-        f"Successfully completed CloudFront cache invalidation: id={invalidation_id}"
-    )
+    logger.info("Successfully completed CloudFront cache invalidation")
+    return invalidation_id
 
 
 def run() -> None:
@@ -211,9 +216,9 @@ def run() -> None:
     logger.info("Starting deploy-to-s3...")
     environment_variables = _fetch_env_variables()
     _validate_dist_directory(environment_variables.dist_path)
-    _upload_to_s3(
+    upload_stats = _upload_to_s3(
         boto3.client(
-            _CLIENT_TYPE,
+            S3_CLIENT_TYPE,
             region_name=environment_variables.aws_region,
             aws_access_key_id=environment_variables.aws_access_key_id,
             aws_secret_access_key=environment_variables.aws_secret_access_key,
@@ -223,7 +228,7 @@ def run() -> None:
     )
     _invalidate_cloudfront(
         boto3.client(
-            _CLOUDFRONT_CLIENT_TYPE,
+            CLOUDFRONT_CLIENT_TYPE,
             region_name=environment_variables.aws_region,
             aws_access_key_id=environment_variables.aws_access_key_id,
             aws_secret_access_key=environment_variables.aws_secret_access_key,
@@ -231,6 +236,13 @@ def run() -> None:
         environment_variables.cloudfront_distribution_id,
     )
     logger.info("Successfully deployed to S3")
+    _log_deploy_summary(
+        DeploySummary(
+            file_count=upload_stats.file_count,
+            bytes_uploaded=upload_stats.bytes_uploaded,
+            upload_duration_seconds=upload_stats.upload_duration_seconds,
+        )
+    )
 
 
 def main() -> int:
