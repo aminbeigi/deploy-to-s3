@@ -1,8 +1,10 @@
-# deploy-to-s3
+# Deploy to S3
 
-A reusable GitHub Action that uploads a built `dist/` directory to an S3 bucket and invalidates a CloudFront distribution.
+I built this repo to automate updating my websites. I usually host them on AWS S3 as static React apps built with Vite, and I wanted a repeatable way to push a fresh build and refresh CloudFront without doing it by hand each time.
 
-Point it at your frontend build output - usually `dist/` from `npm run build` or similar. It uploads everything inside. Deploy fails fast if `dist/` is empty or missing `index.html` at the root, so a forgotten build step is caught before anything hits S3. You also need any JS, CSS, media, and other assets your app references.
+It is a reusable GitHub Action that uploads a built `dist/` directory to an S3 bucket and invalidates a CloudFront distribution.
+
+Point it at your frontend build output — usually `dist/` from `npm run build` or similar (Vite’s default output directory is `dist/`). It uploads everything inside. You also need any JS, CSS, media, and other assets your app references.
 
 A full frontend build often looks like:
 
@@ -19,66 +21,71 @@ dist/
   favicon.ico
 ```
 
-## Getting Started
+## Run locally
 
-These instructions will get you a copy of the project up and running on your local machine for development and testing purposes. See [Deployment](#deployment) for notes on how to use the action in a live CI/CD pipeline.
+Use this when developing the action itself or testing a deploy from your machine before wiring it into CI.
 
 ### Prerequisites
 
 - Python 3.14+
-- [uv](https://docs.astral.sh/uv/) - dependency management
-- AWS credentials with permission to upload to your S3 bucket and create CloudFront invalidations (for local runs)
+- [uv](https://docs.astral.sh/uv/) for dependency management
+- AWS credentials with permission to upload to your S3 bucket and create CloudFront invalidations
 
-### Installing
+### Setup
 
 1. Clone the repository:
 
-```
-git clone https://github.com/aminbeigi/deploy-to-s3.git
-cd deploy-to-s3
-```
+   ```bash
+   git clone https://github.com/aminbeigi/deploy-to-s3.git
+   cd deploy-to-s3
+   ```
 
-1. Install dependencies:
+2. Install dependencies:
 
-```
-uv sync
-```
+   ```bash
+   uv sync
+   ```
 
-1. Copy the environment template (`.env` is gitignored):
+3. Copy the environment template (`.env` is gitignored):
 
-```
-cp .env_template .env
-```
+   ```bash
+   cp .env_template .env
+   ```
 
-1. Edit `.env` with your AWS keys, region, bucket, and CloudFront distribution ID.
-2. Run a local deploy (expects `dist/` at the repo root; set `DIST_PATH` if your build output is elsewhere):
+4. Edit `.env` with your AWS keys, region, bucket, and CloudFront distribution ID.
 
-```
+### Deploy
+
+The command expects `dist/` at the repo root. Set `DIST_PATH` if your build output lives elsewhere.
+
+```bash
 uv run --env-file .env python -m deploy_to_s3
 ```
 
-```
+```bash
 DIST_PATH=/path/to/dist uv run --env-file .env python -m deploy_to_s3
 ```
 
-## Running the Tests
+### Development
 
-Automated tests use pytest. From the project root:
+Run tests:
 
-```
+```bash
 uv run pytest tests/
 ```
 
-## Lint and Format
+Lint and format:
 
-```
+```bash
 uv run ruff check --fix .
 uv run ruff format .
 ```
 
-## Deployment
+## Run as a GitHub Action
 
-Use this action from a consumer repository after your frontend (or static site) build step produces a `dist/` folder.
+Use this from a consumer repository after your frontend build step produces a `dist/` folder.
+
+### Workflow example
 
 In your repo's workflow file (e.g. `.github/workflows/pipeline.yml`):
 
@@ -103,13 +110,28 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
 ```
 
-In the consumer repo, add these as repository secrets (Settings → Secrets and variables → Actions): 
+### Repository secrets
 
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-- `AWS_REGION`
-- `AWS_S3_BUCKET_NAME`
-- `CLOUDFRONT_DISTRIBUTION_ID`
+In the consumer repo, add these under **Settings → Secrets and variables → Actions**:
+
+| Secret | Purpose |
+|--------|---------|
+| `AWS_ACCESS_KEY_ID` | AWS access key |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret key |
+| `AWS_REGION` | AWS region (e.g. `us-east-1`) |
+| `AWS_S3_BUCKET_NAME` | Target S3 bucket |
+| `CLOUDFRONT_DISTRIBUTION_ID` | CloudFront distribution to invalidate after upload |
+
+### Inputs
+
+| Input | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `dist-path` | No | `dist` | Path to built assets, relative to the consumer repo root |
+| `aws-region` | Yes | — | AWS region |
+| `s3-bucket` | Yes | — | S3 bucket name |
+| `cloudfront-distribution-id` | Yes | — | CloudFront distribution ID |
+| `aws-access-key-id` | Yes | — | AWS access key ID |
+| `aws-secret-access-key` | Yes | — | AWS secret access key |
 
 ## Authors
 
