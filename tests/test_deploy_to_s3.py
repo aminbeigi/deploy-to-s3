@@ -302,7 +302,7 @@ class TestMain:
         aws_env: None,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Return 1 and log the error type when the dist directory does not exist.
+        """Return 1 and log the error message when the dist directory does not exist.
 
         Args:
             mock_boto_client: Patched boto3.client, asserted to never be called.
@@ -314,7 +314,7 @@ class TestMain:
         monkeypatch.setenv("DIST_PATH", str(tmp_path / "missing"))
         with caplog.at_level(logging.ERROR):
             assert main() == 1
-        assert "Failed deploy: FileNotFoundError" in caplog.text
+        assert "Failed deploy: Dist directory not found:" in caplog.text
         mock_boto_client.assert_not_called()
 
     @patch("deploy_to_s3.deploy.boto3.client")
@@ -339,7 +339,7 @@ class TestMain:
         monkeypatch.setenv("DIST_PATH", str(dist_dir))
         with caplog.at_level(logging.ERROR):
             assert main() == 1
-        assert "Failed deploy: ValueError" in caplog.text
+        assert "Failed deploy: Dist directory contains no files" in caplog.text
         mock_boto_client.assert_not_called()
 
     @patch("deploy_to_s3.deploy.boto3.client")
@@ -366,7 +366,10 @@ class TestMain:
         monkeypatch.setenv("DIST_PATH", str(dist_dir))
         with caplog.at_level(logging.ERROR):
             assert main() == 1
-        assert "Failed deploy: ValueError" in caplog.text
+        assert (
+            "Failed deploy: Dist directory is missing index.html at the root"
+            in caplog.text
+        )
         mock_boto_client.assert_not_called()
 
     @patch("deploy_to_s3.deploy.boto3.client")
@@ -377,7 +380,7 @@ class TestMain:
         monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Return 1 and log the error type when AWS credentials are not configured.
+        """Return 1 and log the error message when AWS credentials are not configured.
 
         Args:
             mock_boto_client: Patched boto3.client, asserted to never be called.
@@ -388,5 +391,8 @@ class TestMain:
         monkeypatch.setenv("DIST_PATH", str(dist_dir))
         with caplog.at_level(logging.ERROR):
             assert main() == 1
-        assert "Failed deploy: OSError" in caplog.text
+        assert (
+            "Failed deploy: The following environment variables are not set:"
+            in caplog.text
+        )
         mock_boto_client.assert_not_called()

@@ -252,9 +252,7 @@ def main() -> int:
         run()
         return 0
     except Exception as e:
-        # Log only the exception type — never the message or traceback, which
-        # may contain env var values, file paths, or boto3 error details.
-        logger.error(f"Failed deploy: {type(e).__name__}")
+        logger.error(f"Failed deploy: {e}")
         return 1
 
 
