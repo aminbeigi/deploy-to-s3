@@ -66,6 +66,18 @@ uv run --env-file .env python -m deploy_to_s3
 DIST_PATH=/path/to/dist uv run --env-file .env python -m deploy_to_s3
 ```
 
+### Dry run
+
+Pass `--dry-run` to validate configuration and log exactly which files would be uploaded without making any AWS calls. Useful for checking your build output before a real deploy.
+
+```bash
+uv run --env-file .env python -m deploy_to_s3 --dry-run
+```
+
+```bash
+DIST_PATH=/path/to/dist uv run --env-file .env python -m deploy_to_s3 --dry-run
+```
+
 ### Development
 
 Run tests:

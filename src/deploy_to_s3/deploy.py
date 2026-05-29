@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import boto3
 
+from deploy_to_s3.cli import parse_args
 from deploy_to_s3.constants.literals import (
     CLOUDFRONT_CLIENT_TYPE,
     DEFAULT_DIST_DIR_NAME,
@@ -199,8 +200,11 @@ def _invalidate_cloudfront(
     return invalidation_id
 
 
-def run() -> None:
+def run(dry_run: bool = False) -> None:
     """Orchestrate the deploy workflow: upload to S3 and invalidate CloudFront.
+
+    When ``dry_run`` is ``True``, all validation steps run as normal but no AWS
+    calls are made. The files that would be uploaded are logged instead.
 
     Expects the following environment variables:
 
@@ -213,30 +217,41 @@ def run() -> None:
     Optional:
 
     * ``DIST_PATH`` — override the local distribution directory.
+
+    Args:
+        dry_run: When ``True``, skip all AWS side effects and log planned actions only.
     """
     logger.info("Starting deploy-to-s3...")
     environment_variables = _fetch_env_variables()
     _validate_dist_directory(environment_variables.dist_path)
-    upload_stats = _upload_to_s3(
-        boto3.client(
-            S3_CLIENT_TYPE,
-            region_name=environment_variables.aws_region,
-            aws_access_key_id=environment_variables.aws_access_key_id,
-            aws_secret_access_key=environment_variables.aws_secret_access_key,
-        ),
-        environment_variables.aws_s3_bucket_name,
-        environment_variables.dist_path,
-    )
-    _invalidate_cloudfront(
-        boto3.client(
-            CLOUDFRONT_CLIENT_TYPE,
-            region_name=environment_variables.aws_region,
-            aws_access_key_id=environment_variables.aws_access_key_id,
-            aws_secret_access_key=environment_variables.aws_secret_access_key,
-        ),
-        environment_variables.cloudfront_distribution_id,
-    )
-    logger.info("Successfully deployed to S3")
+    if dry_run:
+        logger.info("Dry run: skipping S3 upload and CloudFront invalidation")
+        upload_stats = UploadStats(
+            file_count=0,
+            bytes_uploaded=0,
+            upload_duration_seconds=0.0,
+        )
+    else:
+        upload_stats = _upload_to_s3(
+            boto3.client(
+                S3_CLIENT_TYPE,
+                region_name=environment_variables.aws_region,
+                aws_access_key_id=environment_variables.aws_access_key_id,
+                aws_secret_access_key=environment_variables.aws_secret_access_key,
+            ),
+            environment_variables.aws_s3_bucket_name,
+            environment_variables.dist_path,
+        )
+        _invalidate_cloudfront(
+            boto3.client(
+                CLOUDFRONT_CLIENT_TYPE,
+                region_name=environment_variables.aws_region,
+                aws_access_key_id=environment_variables.aws_access_key_id,
+                aws_secret_access_key=environment_variables.aws_secret_access_key,
+            ),
+            environment_variables.cloudfront_distribution_id,
+        )
+        logger.info("Successfully deployed to S3")
     _log_deploy_summary(
         DeploySummary(
             file_count=upload_stats.file_count,
@@ -246,11 +261,19 @@ def run() -> None:
     )
 
 
-def main() -> int:
-    """Run the application and return a process exit code."""
+def main(argv: list[str] | None = None) -> int:
+    """Parse arguments, configure logging, and run the deploy pipeline.
+
+    Args:
+        argv: Argument list to parse. Defaults to ``sys.argv[1:]`` when ``None``.
+
+    Returns:
+        ``0`` on success, ``1`` on any unhandled exception.
+    """
+    args = parse_args(argv)
     configure_logging(level=logging.INFO)
     try:
-        run()
+        run(dry_run=args.dry_run)
         return 0
     except Exception as exc:
         logger.error(

@@ -279,7 +279,7 @@ class TestMain:
         mock_boto_client.side_effect = _make_client
 
         with caplog.at_level(logging.INFO):
-            assert main() == 0
+            assert main([]) == 0
         mock_s3.upload_file.assert_called_once()
         mock_cf.create_invalidation.assert_called_once()
         assert "Deploy summary:" in caplog.text
@@ -296,6 +296,40 @@ class TestMain:
             aws_access_key_id="test-key-id",
             aws_secret_access_key="test-secret",
         )
+
+    @patch("deploy_to_s3.deploy.boto3.client")
+    def test_dry_run_skips_aws_calls(
+        self,
+        mock_boto_client: MagicMock,
+        dist_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        aws_env: None,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Return 0, make no AWS calls, and log planned upload details in dry-run mode.
+
+        Args:
+            mock_boto_client: Patched boto3.client, asserted to never be called.
+            dist_dir: Temporary dist directory with an HTML file and a JS asset.
+            monkeypatch: pytest fixture for patching environment variables.
+            aws_env: Fixture that sets all required AWS environment variables.
+            caplog: pytest fixture for capturing log output.
+        """
+        (dist_dir / "index.html").write_text("<html></html>")
+        assets = dist_dir / "assets"
+        assets.mkdir()
+        (assets / "app.js").write_text("console.log(1)")
+        monkeypatch.setenv("DIST_PATH", str(dist_dir))
+
+        with caplog.at_level(logging.INFO):
+            assert main(["--dry-run"]) == 0
+
+        mock_boto_client.assert_not_called()
+        assert "Would upload: index.html" in caplog.text
+        assert "Would upload: assets/app.js" in caplog.text
+        assert "skipping CloudFront invalidation" in caplog.text
+        assert "Deploy summary:" in caplog.text
+        assert "Files uploaded: 2" in caplog.text
 
     @patch("deploy_to_s3.deploy.boto3.client")
     def test_returns_1_when_dist_missing(
@@ -317,7 +351,7 @@ class TestMain:
         """
         monkeypatch.setenv("DIST_PATH", str(tmp_path / "missing"))
         with caplog.at_level(logging.ERROR):
-            assert main() == 1
+            assert main([]) == 1
         assert "Fatal error (FileNotFoundError)" in caplog.text
         mock_boto_client.assert_not_called()
 
@@ -342,7 +376,7 @@ class TestMain:
         (dist_dir / "index.html").unlink()
         monkeypatch.setenv("DIST_PATH", str(dist_dir))
         with caplog.at_level(logging.ERROR):
-            assert main() == 1
+            assert main([]) == 1
         assert "Fatal error (ValueError)" in caplog.text
         mock_boto_client.assert_not_called()
 
@@ -369,7 +403,7 @@ class TestMain:
         (dist_dir / "assets" / "app.js").write_text("console.log(1)")
         monkeypatch.setenv("DIST_PATH", str(dist_dir))
         with caplog.at_level(logging.ERROR):
-            assert main() == 1
+            assert main([]) == 1
         assert "Fatal error (ValueError)" in caplog.text
         mock_boto_client.assert_not_called()
 
@@ -391,6 +425,6 @@ class TestMain:
         """
         monkeypatch.setenv("DIST_PATH", str(dist_dir))
         with caplog.at_level(logging.ERROR):
-            assert main() == 1
+            assert main([]) == 1
         assert "Fatal error (OSError)" in caplog.text
         mock_boto_client.assert_not_called()
