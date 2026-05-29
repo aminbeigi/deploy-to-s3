@@ -270,9 +270,13 @@ class TestMain:
             "Invalidation": {"Id": "INV1"},
             "ResponseMetadata": {"HTTPStatusCode": 201},
         }
-        mock_boto_client.side_effect = lambda svc, **_: (
-            mock_s3 if svc == "s3" else mock_cf
-        )
+
+        def _make_client(svc: str, **_: object) -> MagicMock:
+            if svc == "s3":
+                return mock_s3
+            return mock_cf
+
+        mock_boto_client.side_effect = _make_client
 
         with caplog.at_level(logging.INFO):
             assert main() == 0
@@ -314,7 +318,7 @@ class TestMain:
         monkeypatch.setenv("DIST_PATH", str(tmp_path / "missing"))
         with caplog.at_level(logging.ERROR):
             assert main() == 1
-        assert "Failed deploy: Dist directory not found:" in caplog.text
+        assert "Fatal error (FileNotFoundError)" in caplog.text
         mock_boto_client.assert_not_called()
 
     @patch("deploy_to_s3.deploy.boto3.client")
@@ -339,7 +343,7 @@ class TestMain:
         monkeypatch.setenv("DIST_PATH", str(dist_dir))
         with caplog.at_level(logging.ERROR):
             assert main() == 1
-        assert "Failed deploy: Dist directory contains no files" in caplog.text
+        assert "Fatal error (ValueError)" in caplog.text
         mock_boto_client.assert_not_called()
 
     @patch("deploy_to_s3.deploy.boto3.client")
@@ -366,10 +370,7 @@ class TestMain:
         monkeypatch.setenv("DIST_PATH", str(dist_dir))
         with caplog.at_level(logging.ERROR):
             assert main() == 1
-        assert (
-            "Failed deploy: Dist directory is missing index.html at the root"
-            in caplog.text
-        )
+        assert "Fatal error (ValueError)" in caplog.text
         mock_boto_client.assert_not_called()
 
     @patch("deploy_to_s3.deploy.boto3.client")
@@ -391,8 +392,5 @@ class TestMain:
         monkeypatch.setenv("DIST_PATH", str(dist_dir))
         with caplog.at_level(logging.ERROR):
             assert main() == 1
-        assert (
-            "Failed deploy: The following environment variables are not set:"
-            in caplog.text
-        )
+        assert "Fatal error (OSError)" in caplog.text
         mock_boto_client.assert_not_called()

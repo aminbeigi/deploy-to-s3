@@ -4,29 +4,39 @@ Exposes :func:`configure_logging` to initialise handlers and
 :func:`get_logger` to obtain a named logger anywhere in the package.
 """
 
+import functools
 import logging
 import sys
 from pathlib import Path
+from typing import Literal
 
+_LOG_FORMAT = (
+    "%(asctime)s - %(levelname)-5s - %(name)s - %(filename)s:%(lineno)d - %(message)s"
+)
 _LOG_FILE = Path("logs") / "app.log"
-_FORMAT = "%(asctime)s - %(levelname)-8s - %(name)s:%(lineno)d - %(message)s"
+LogLevel = Literal[logging.INFO, logging.DEBUG]
+_ALLOWED_LOG_LEVELS = frozenset[int]({logging.INFO, logging.DEBUG})
 
 
-def configure_logging() -> None:
-    """Configure root logger with stdout and file handlers.
+@functools.cache
+def configure_logging(*, level: LogLevel) -> None:
+    """Configure application logging. Call once before :func:`get_logger`.
 
-    Writes INFO-level records to both stdout and ``logs/app.log``.
-    Safe to call multiple times; subsequent calls are no-ops if the root
-    logger already has handlers.
+    Args:
+        level: ``logging.INFO`` or ``logging.DEBUG`` only.
+
+    Raises:
+        ValueError: If ``level`` is not INFO or DEBUG.
     """
-    if logging.getLogger().handlers:
-        return
+    if level not in _ALLOWED_LOG_LEVELS:
+        msg = f"level must be logging.INFO or logging.DEBUG, got {level!r}"
+        raise ValueError(msg)
 
     _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     logging.basicConfig(
-        level=logging.INFO,
-        format=_FORMAT,
+        level=level,
+        format=_LOG_FORMAT,
         handlers=[
             logging.StreamHandler(sys.stdout),
             logging.FileHandler(_LOG_FILE, encoding="utf-8"),

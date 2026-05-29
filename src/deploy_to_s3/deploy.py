@@ -4,6 +4,7 @@ This module uploads build artifacts from a local ``dist/`` directory to an S3
 bucket and optionally invalidates a CloudFront distribution cache.
 """
 
+import logging
 import mimetypes
 import os
 import sys
@@ -247,12 +248,15 @@ def run() -> None:
 
 def main() -> int:
     """Run the application and return a process exit code."""
-    configure_logging()
+    configure_logging(level=logging.INFO)
     try:
         run()
         return 0
-    except Exception as e:
-        logger.error(f"Failed deploy: {e}")
+    except Exception as exc:
+        logger.error(
+            f"Fatal error ({type(exc).__name__})",
+            exc_info=logger.isEnabledFor(logging.DEBUG),
+        )
         return 1
 
 
