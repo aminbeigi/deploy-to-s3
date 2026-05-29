@@ -306,7 +306,7 @@ class TestMain:
         aws_env: None,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Return 0, make no AWS calls, and log planned upload details in dry-run mode.
+        """Return 0, make no AWS calls, and log a skip message in dry-run mode.
 
         Args:
             mock_boto_client: Patched boto3.client, asserted to never be called.
@@ -325,11 +325,9 @@ class TestMain:
             assert main(["--dry-run"]) == 0
 
         mock_boto_client.assert_not_called()
-        assert "Would upload: index.html" in caplog.text
-        assert "Would upload: assets/app.js" in caplog.text
-        assert "skipping CloudFront invalidation" in caplog.text
+        assert "Dry run: skipping S3 upload and CloudFront invalidation" in caplog.text
         assert "Deploy summary:" in caplog.text
-        assert "Files uploaded: 2" in caplog.text
+        assert "Files uploaded: 0" in caplog.text
 
     @patch("deploy_to_s3.deploy.boto3.client")
     def test_returns_1_when_dist_missing(
