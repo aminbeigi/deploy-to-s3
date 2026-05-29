@@ -23,7 +23,7 @@ from deploy_to_s3.constants.literals import (
     REQUIRED_ENV_VAR_NAMES,
     S3_CLIENT_TYPE,
 )
-from deploy_to_s3.constants.models import DeploySummary, EnvironmentConfig, UploadStats
+from deploy_to_s3.constants.models import EnvironmentConfig, UploadStats
 from deploy_to_s3.logger import configure_logging, get_logger
 
 if TYPE_CHECKING:
@@ -72,7 +72,7 @@ def _fetch_env_variables() -> EnvironmentConfig:
     )
 
 
-def _log_deploy_summary(summary: DeploySummary) -> None:
+def _log_deploy_summary(summary: UploadStats) -> None:
     """Log a multi-line deploy summary to stdout and the log file.
 
     Infrastructure identifiers (bucket, distribution, invalidation) are always
@@ -254,13 +254,7 @@ def run(dry_run: bool = False) -> None:
             environment_variables.cloudfront_distribution_id,
         )
         logger.info("Successfully deployed to S3")
-    _log_deploy_summary(
-        DeploySummary(
-            file_count=upload_stats.file_count,
-            bytes_uploaded=upload_stats.bytes_uploaded,
-            upload_duration_seconds=upload_stats.upload_duration_seconds,
-        )
-    )
+    _log_deploy_summary(upload_stats)
 
 
 def main(argv: list[str] | None = None) -> int:

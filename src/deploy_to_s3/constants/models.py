@@ -20,21 +20,6 @@ class UploadStats:
 
 
 @dataclass(frozen=True)
-class DeploySummary:
-    """End-of-deploy statistics for logging.
-
-    Attributes:
-        bytes_uploaded: Total size in bytes of all uploaded files.
-        file_count: Number of files uploaded.
-        upload_duration_seconds: Wall-clock time spent uploading to S3.
-    """
-
-    file_count: int
-    bytes_uploaded: int
-    upload_duration_seconds: float
-
-
-@dataclass(frozen=True)
 class EnvironmentConfig:
     """Immutable container for deploy environment configuration.
 

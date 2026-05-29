@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from deploy_to_s3.constants.models import DeploySummary, EnvironmentConfig
+from deploy_to_s3.constants.models import EnvironmentConfig, UploadStats
 from deploy_to_s3.deploy import (
     _fetch_env_variables,
     _invalidate_cloudfront,
@@ -225,7 +225,7 @@ class TestLogDeploySummary:
         Args:
             caplog: pytest fixture for capturing log output.
         """
-        summary = DeploySummary(
+        summary = UploadStats(
             file_count=3,
             bytes_uploaded=2048,
             upload_duration_seconds=1.25,
