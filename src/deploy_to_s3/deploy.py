@@ -82,13 +82,15 @@ def _log_deploy_summary(summary: DeploySummary) -> None:
     Args:
         summary: Aggregated deploy metrics from upload and invalidation.
     """
-    logger.info("Deploy summary:")
-    logger.info(f"  Files uploaded: {summary.file_count}")
-    logger.info(f"  Bytes uploaded: {summary.bytes_uploaded}")
-    logger.info(f"  Upload duration: {summary.upload_duration_seconds:.2f}s")
-    logger.info(f"  S3 bucket: {REDACTED}")
-    logger.info(f"  CloudFront distribution: {REDACTED}")
-    logger.info(f"  CloudFront invalidation: {REDACTED}")
+    logger.info(
+        f"Deploy summary:\n"
+        f"  Files uploaded: {summary.file_count}\n"
+        f"  Bytes uploaded: {summary.bytes_uploaded}\n"
+        f"  Upload duration: {summary.upload_duration_seconds:.2f}s\n"
+        f"  S3 bucket: {REDACTED}\n"
+        f"  CloudFront distribution: {REDACTED}\n"
+        f"  CloudFront invalidation: {REDACTED}"
+    )
 
 
 def _list_dist_files(dist_dir: Path) -> list[Path]:
